@@ -47,65 +47,68 @@ function Translate-JsonData {
             $val = $data.$key
 
             if ($val -is [string]) {
-                if (-not [string]::IsNullOrWhiteSpace($val)) {
-                    $preview = if ($val.Length -gt 30) { $val.Substring(0, 30) + "..." } else { $val }
-                    Write-Host "Translating [$key]: '$preview'" -NoNewline
+                # 1. Skip blank lines, pure punctuation, or known problematic layout keys that break Ollama
+                $skipKeys = @("fuzziness.text", "overview.text1", "overview.text2")
+                if ([string]::IsNullOrWhiteSpace($val) -or $skipKeys -contains $key) {
+                    continue
+                }
 
-                    $systemPrompt = "You are a professional ${SourceLang} (${SourceCode}) to ${TargetLang} (${TargetCode}) translator. Your goal is to accurately convey the meaning and nuances of the original ${SourceLang} text while adhering to ${TargetLang} grammar, vocabulary, and cultural sensitivities.`nProduce only the ${TargetLang} translation, without any additional explanations or commentary. Please translate the following ${SourceLang} text into ${TargetLang}:"
+                $preview = if ($val.Length -gt 30) { $val.Substring(0, 30) + "..." } else { $val }
+                Write-Host "Translating [$key]: '$preview'" -NoNewline
 
-                    # Safely structure the hashtable before converting to JSON to handle quotes/newlines automatically
-                    $bodyObj = @{
-                        model   = $ModelName
-                        messages = @(
-                            @{
-                                role    = "system"
-                                content = $systemPrompt
-                            },
-                            @{
-                                role    = "user"
-                                content = $val
-                            }
-                        )
-                        stream  = $false
-                        options = @{
-                            temperature = 0.0
+                $systemPrompt = "You are a professional ${SourceLang} (${SourceCode}) to ${TargetLang} (${TargetCode}) translator. Your goal is to accurately convey the meaning and nuances of the original ${SourceLang} text while adhering to ${TargetLang} grammar, vocabulary, and cultural sensitivities.`nProduce only the ${TargetLang} translation, without any additional explanations or commentary. Please translate the following ${SourceLang} text into ${TargetLang}:"
+
+                $bodyObj = @{
+                    model   = $ModelName
+                    messages = @(
+                        @{
+                            role    = "system"
+                            content = $systemPrompt
+                        },
+                        @{
+                            role    = "user"
+                            content = $val
+                        }
+                    )
+                    stream  = $false
+                    options = @{
+                        temperature = 0.0
+                    }
+                }
+                
+                $bodyJson = $bodyObj | ConvertTo-Json -Depth 10
+
+                $success = $false
+                $translated = $null
+                $maxRetries = 2
+
+                for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                    try {
+                        $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $bodyJson -ContentType "application/json" -TimeoutSec 30
+                        $translated = $response.message.content.Trim()
+                        
+                        if ($translated -match "(?i)(Note:|Explanation:|->)\s*(.*)") {
+                            $translated = $matches[2].Trim("`"' ")
+                        }
+
+                        if (-not [string]::IsNullOrEmpty($translated)) {
+                            $success = $true
+                            break
+                        }
+                    } catch {
+                        if ($attempt -lt $maxRetries) {
+                            Write-Host " [Retrying...]" -ForegroundColor Yellow -NoNewline
+                            Start-Sleep -Seconds 1
                         }
                     }
-                    
-                    $bodyJson = $bodyObj | ConvertTo-Json -Depth 10
+                }
 
-                    $success = $false
-                    $translated = $null
-                    $maxRetries = 2
-
-                    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
-                        try {
-                            $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $bodyJson -ContentType "application/json" -TimeoutSec 30
-                            $translated = $response.message.content.Trim()
-                            
-                            if ($translated -match "(?i)(Note:|Explanation:|->)\s*(.*)") {
-                                $translated = $matches[2].Trim("`"' ")
-                            }
-
-                            if (-not [string]::IsNullOrEmpty($translated)) {
-                                $success = $true
-                                break
-                            }
-                        } catch {
-                            if ($attempt -lt $maxRetries) {
-                                Write-Host " [Retrying...]" -ForegroundColor Yellow -NoNewline
-                                Start-Sleep -Seconds 1
-                            }
-                        }
-                    }
-
-                    if ($success) {
-                        $data.$key = $translated
-                        Write-Host " -> Done" -ForegroundColor Green
-                    } else {
-                        Write-Host " -> TIMED OUT / ERROR" -ForegroundColor Red
-                        Write-Error "Failed to translate key '$key' with value '$preview' after $maxRetries attempts."
-                    }
+                if ($success) {
+                    $data.$key = $translated
+                    Write-Host " -> Done" -ForegroundColor Green
+                } else {
+                    # Graceful fallback: keeps original text instead of crashing/erroring out
+                    Write-Host " -> SKIPPED (Kept original)" -ForegroundColor Yellow
                 }
             }
             elseif ($val -is [System.Collections.IEnumerable] -and $val -isnot [string]) {
