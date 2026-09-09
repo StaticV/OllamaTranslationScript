@@ -53,23 +53,26 @@ function Translate-JsonData {
 
                     $systemPrompt = "You are a professional ${SourceLang} (${SourceCode}) to ${TargetLang} (${TargetCode}) translator. Your goal is to accurately convey the meaning and nuances of the original ${SourceLang} text while adhering to ${TargetLang} grammar, vocabulary, and cultural sensitivities.`nProduce only the ${TargetLang} translation, without any additional explanations or commentary. Please translate the following ${SourceLang} text into ${TargetLang}:"
 
-                    $body = @{
-                        model  = $ModelName
+                    # Safely structure the hashtable before converting to JSON to handle quotes/newlines automatically
+                    $bodyObj = @{
+                        model   = $ModelName
                         messages = @(
                             @{
-                                role = "system"
+                                role    = "system"
                                 content = $systemPrompt
                             },
                             @{
-                                role = "user"
+                                role    = "user"
                                 content = $val
                             }
                         )
-                        stream = $false
+                        stream  = $false
                         options = @{
                             temperature = 0.0
                         }
-                    } | ConvertTo-Json -Depth 10
+                    }
+                    
+                    $bodyJson = $bodyObj | ConvertTo-Json -Depth 10
 
                     $success = $false
                     $translated = $null
@@ -77,7 +80,7 @@ function Translate-JsonData {
 
                     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                         try {
-                            $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 30
+                            $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $bodyJson -ContentType "application/json" -TimeoutSec 30
                             $translated = $response.message.content.Trim()
                             
                             if ($translated -match "(?i)(Note:|Explanation:|->)\s*(.*)") {
@@ -139,7 +142,6 @@ Get-ChildItem -Path $InputFolder -Filter "*.json" -Recurse | ForEach-Object {
     Write-Host "`nProcessing file: $relativePath" -ForegroundColor Cyan
 
     try {
-        # FIXED: Added -Encoding utf8 so special characters/symbols read correctly
         $jsonContent = Get-Content -Path $filePath -Raw -Encoding utf8 | ConvertFrom-Json
         $translatedContent = Translate-JsonData -data $jsonContent
         $translatedContent | ConvertTo-Json -Depth 100 | Set-Content -Path $outputPath -Encoding utf8
