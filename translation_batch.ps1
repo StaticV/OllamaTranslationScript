@@ -71,23 +71,38 @@ function Translate-JsonData {
                         }
                     } | ConvertTo-Json -Depth 10
 
-                    try {
-                        $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 30
-                        $translated = $response.message.content.Trim()
-                        
-                        if ($translated -match "(?i)(Note:|Explanation:|->)\s*(.*)") {
-                            $translated = $matches[2].Trim("`"' ")
-                        }
+                    $success = $false
+                    $translated = $null
+                    $maxRetries = 2
 
-                        if (-not [string]::IsNullOrEmpty($translated)) {
-                            $data.$key = $translated
-                            Write-Host " -> Done" -ForegroundColor Green
-                        } else {
-                            Write-Host " -> Empty response, kept original" -ForegroundColor Yellow
+                    # Retry loop
+                    for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
+                        try {
+                            $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 30
+                            $translated = $response.message.content.Trim()
+                            
+                            if ($translated -match "(?i)(Note:|Explanation:|->)\s*(.*)") {
+                                $translated = $matches[2].Trim("`"' ")
+                            }
+
+                            if (-not [string]::IsNullOrEmpty($translated)) {
+                                $success = $true
+                                break # Exit retry loop on success
+                            }
+                        } catch {
+                            if ($attempt -lt $maxRetries) {
+                                Write-Host " [Retrying...]" -ForegroundColor Yellow -NoNewline
+                                Start-Sleep -Seconds 1 # Brief pause before retrying
+                            }
                         }
-                    } catch {
+                    }
+
+                    if ($success) {
+                        $data.$key = $translated
+                        Write-Host " -> Done" -ForegroundColor Green
+                    } else {
                         Write-Host " -> TIMED OUT / ERROR" -ForegroundColor Red
-                        Write-Error "Failed to translate key '$key' with value '$preview': $_"
+                        Write-Error "Failed to translate key '$key' with value '$preview' after $maxRetries attempts."
                     }
                 }
             }
@@ -114,7 +129,6 @@ function Translate-JsonData {
 Get-ChildItem -Path $InputFolder -Filter "*.json" -Recurse | ForEach-Object {
     $filePath = $_.FullName
     
-    # Calculate relative path reliably using PowerShell string replacement
     $relativePath = $filePath.Substring($InputFolder.Length).TrimStart('\', '/')
     $outputPath = Join-Path $OutputFolder $relativePath
     $outputDir = [System.IO.Path]::GetDirectoryName($outputPath)
