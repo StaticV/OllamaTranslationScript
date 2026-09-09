@@ -28,9 +28,12 @@ param(
     [string]$TargetCode = "uk"
 )
 
-# Normalize paths to avoid slash mismatch issues
+# Resolve full paths cleanly
 $InputFolder = (Resolve-Path $InputFolder).Path
-$OutputFolder = [System.IO.Path]::GetFullPath($OutputFolder)
+if (-not (Test-Path $OutputFolder)) {
+    New-Item -ItemType Directory -Force -Path $OutputFolder | Out-Null
+}
+$OutputFolder = (Resolve-Path $OutputFolder).Path
 
 function Translate-JsonData {
     param ($data)
@@ -84,7 +87,6 @@ function Translate-JsonData {
                         }
                     } catch {
                         Write-Host " -> TIMED OUT / ERROR" -ForegroundColor Red
-                        # Using Write-Error so it routes to PowerShell's error stream for redirection
                         Write-Error "Failed to translate key '$key' with value '$preview': $_"
                     }
                 }
@@ -112,7 +114,8 @@ function Translate-JsonData {
 Get-ChildItem -Path $InputFolder -Filter "*.json" -Recurse | ForEach-Object {
     $filePath = $_.FullName
     
-    $relativePath = [System.IO.Path]::GetRelativePath($InputFolder, $filePath)
+    # Calculate relative path reliably using PowerShell string replacement
+    $relativePath = $filePath.Substring($InputFolder.Length).TrimStart('\', '/')
     $outputPath = Join-Path $OutputFolder $relativePath
     $outputDir = [System.IO.Path]::GetDirectoryName($outputPath)
 
