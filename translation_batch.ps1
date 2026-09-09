@@ -28,10 +28,9 @@ param(
     [string]$TargetCode = "uk"
 )
 
-# Ensure output folder exists
-if (!(Test-Path $OutputFolder)) {
-    New-Item -ItemType Directory -Force -Path $OutputFolder | Out-Null
-}
+# Normalize paths to avoid slash mismatch issues
+$InputFolder = (Resolve-Path $InputFolder).Path
+$OutputFolder = [System.IO.Path]::GetFullPath($OutputFolder)
 
 function Translate-JsonData {
     param ($data)
@@ -49,7 +48,6 @@ function Translate-JsonData {
                     $preview = if ($val.Length -gt 30) { $val.Substring(0, 30) + "..." } else { $val }
                     Write-Host "Translating [$key]: '$preview'" -NoNewline
 
-                    # Using explicit curly braces {} around variables to prevent PowerShell parsing errors
                     $systemPrompt = "You are a professional ${SourceLang} (${SourceCode}) to ${TargetLang} (${TargetCode}) translator. Your goal is to accurately convey the meaning and nuances of the original ${SourceLang} text while adhering to ${TargetLang} grammar, vocabulary, and cultural sensitivities.`nProduce only the ${TargetLang} translation, without any additional explanations or commentary. Please translate the following ${SourceLang} text into ${TargetLang}:"
 
                     $body = @{
@@ -74,7 +72,6 @@ function Translate-JsonData {
                         $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 30
                         $translated = $response.message.content.Trim()
                         
-                        # Cleanup safety guard if the model leaks anything
                         if ($translated -match "(?i)(Note:|Explanation:|->)\s*(.*)") {
                             $translated = $matches[2].Trim("`"' ")
                         }
@@ -87,7 +84,8 @@ function Translate-JsonData {
                         }
                     } catch {
                         Write-Host " -> TIMED OUT / ERROR" -ForegroundColor Red
-                        Write-Warning "Skipping key '$key' due to error: $_"
+                        # Using Write-Error so it routes to PowerShell's error stream for redirection
+                        Write-Error "Failed to translate key '$key' with value '$preview': $_"
                     }
                 }
             }
@@ -110,12 +108,19 @@ function Translate-JsonData {
     return $data
 }
 
-# Process all JSON files in the input folder
-Get-ChildItem -Path $InputFolder -Filter "*.json" | ForEach-Object {
+# Process all JSON files recursively in the input folder and subdirectories
+Get-ChildItem -Path $InputFolder -Filter "*.json" -Recurse | ForEach-Object {
     $filePath = $_.FullName
-    $outputPath = Join-Path $OutputFolder $_.Name
+    
+    $relativePath = [System.IO.Path]::GetRelativePath($InputFolder, $filePath)
+    $outputPath = Join-Path $OutputFolder $relativePath
+    $outputDir = [System.IO.Path]::GetDirectoryName($outputPath)
 
-    Write-Host "`nProcessing file: $($_.Name)" -ForegroundColor Cyan
+    if (!(Test-Path $outputDir)) {
+        New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+    }
+
+    Write-Host "`nProcessing file: $relativePath" -ForegroundColor Cyan
 
     try {
         $jsonContent = Get-Content -Path $filePath -Raw | ConvertFrom-Json
@@ -124,7 +129,7 @@ Get-ChildItem -Path $InputFolder -Filter "*.json" | ForEach-Object {
 
         Write-Host "Successfully saved: $outputPath" -ForegroundColor Green
     } catch {
-        Write-Error "Failed to process file $($_.Name): $_"
+        Write-Error "Failed to process file $relativePath : $_"
     }
 }
 
