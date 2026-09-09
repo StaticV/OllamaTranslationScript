@@ -1,1 +1,6 @@
-.\translate_batch.ps1 -i "C:\my_data\json_files" -o "C:\my_data\translated" -m "qwen2.5:14b" -l "French"
+Using TranslateGemma
+https://ollama.com/library/translategemma
+
+ollama run translategemma:12b
+
+powershell -ExecutionPolicy Bypass -File .\translation_batch.ps1 -i "C:\Users\Morpheus\Documents\GitHub\assemblyline-ui-frontend\src\locales\en" -o "C:\Users\Morpheus\Documents\GitHub\assemblyline-ui-frontend\src\locales\uk" -sl "English" -sc "en" -tl "French" -tc "fr" -m "translategemma:12b"
