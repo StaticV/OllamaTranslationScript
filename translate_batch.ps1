@@ -80,13 +80,10 @@ foreach ($file in $jsonFiles) {
         $response = Invoke-RestMethod -Uri $u -Method Post -Body $body -ContentType "application/json"
         $rawContent = $response.message.content.Trim()
 
-        # Clean markdown ticks if the model included them (using safe .Split methods)
-        if ($rawContent.StartsWith("```")) {
-            $lines = $rawContent.Split(@("`r`n", "`n"), [System.StringSplitOptions]::None)
-            if ($lines[0].Trim().StartsWith("```")) { $lines = $lines[1..($lines.Length - 1)] }
-            if ($lines[$lines.Length - 1].Trim().StartsWith("```")) { $lines = $lines[0..($lines.Length - 2)] }
-            $rawContent = [string]::Join([Environment]::NewLine, $lines).Trim()
-        }
+        # Clean markdown ticks using Regex (safe from backtick interpretation errors)
+        $rawContent = [System.Text.RegularExpressions.Regex]::Replace($rawContent, '^```(?:json)?\s*', '')
+        $rawContent = [System.Text.RegularExpressions.Regex]::Replace($rawContent, '\s*```$', '')
+        $rawContent = $rawContent.Trim()
 
         # Validate that the response is valid JSON
         $null = $rawContent | ConvertFrom-Json
