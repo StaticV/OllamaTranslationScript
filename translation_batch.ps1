@@ -75,7 +75,6 @@ function Translate-JsonData {
                     $translated = $null
                     $maxRetries = 2
 
-                    # Retry loop
                     for ($attempt = 1; $attempt -le $maxRetries; $attempt++) {
                         try {
                             $response = Invoke-RestMethod -Uri "http://localhost:11434/api/chat" -Method Post -Body $body -ContentType "application/json" -TimeoutSec 30
@@ -87,12 +86,12 @@ function Translate-JsonData {
 
                             if (-not [string]::IsNullOrEmpty($translated)) {
                                 $success = $true
-                                break # Exit retry loop on success
+                                break
                             }
                         } catch {
                             if ($attempt -lt $maxRetries) {
                                 Write-Host " [Retrying...]" -ForegroundColor Yellow -NoNewline
-                                Start-Sleep -Seconds 1 # Brief pause before retrying
+                                Start-Sleep -Seconds 1
                             }
                         }
                     }
@@ -140,7 +139,8 @@ Get-ChildItem -Path $InputFolder -Filter "*.json" -Recurse | ForEach-Object {
     Write-Host "`nProcessing file: $relativePath" -ForegroundColor Cyan
 
     try {
-        $jsonContent = Get-Content -Path $filePath -Raw | ConvertFrom-Json
+        # FIXED: Added -Encoding utf8 so special characters/symbols read correctly
+        $jsonContent = Get-Content -Path $filePath -Raw -Encoding utf8 | ConvertFrom-Json
         $translatedContent = Translate-JsonData -data $jsonContent
         $translatedContent | ConvertTo-Json -Depth 100 | Set-Content -Path $outputPath -Encoding utf8
 
